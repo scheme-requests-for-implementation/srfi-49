@@ -48,9 +48,8 @@ syntax of Python only covers statements, not expessions and data.
 Specification
 
 Each line in a file is either empty (contains only whitepace and/or a
-comment), or contains ome code, preceeded by some number of space
-characters. For this proposal, a TAB should be counted as exactly four
-spaces.
+comment), or contains some code, preceeded by some number of space
+and/or tab characters.
 
 In the following syntax definition, this initial space, as well as
 linebreaks, is not included in the rules. Instead, preceding any
@@ -59,7 +58,9 @@ space of the last non-empty line preceeding it, and then removed. If
 the line is preceeded by more space than the last one was, the special
 symbol INDENT is added to the beginning of the line, and if it is
 preceeded by less space than the lastt one was, the special symbol
-DEDENT is added to the beginning of the line.
+DEDENT is added to the beginning of the line. It is an error if
+neither one of the leading space/tab seqquences are a prefix of the
+other, nor are they equal.
 
 The special non-terminal symbol sexpr expands to any valid
 S-expression, and the special terminal symbol GROUP expands to the
@@ -143,6 +144,7 @@ Implementation
 The following code implements I-expressions as a GNU Guile module that
 can be loaded with (use-modules (sugar)).
 
+----{ sugar.scm }----
 (define-module (sugar))
 
 (define-public group 'group)
@@ -171,16 +173,21 @@ can be loaded with (use-modules (sugar)).
      (t
       (sugar-read-save port)))))
 
+(define (indentation>? indentation1 indentation2)
+  (let ((len1 (string-length indentation1))
+	(len2 (string-length indentation2)))
+    (and (> len1 len2)
+	 (string=? indentation2 (substring indentation1 0 len2)))))
+
 (define (indentationlevel port)
-  (define (indentationlevel level)
-    (if (eq? (peek-char port) #\space)
-	(begin
-	  (read-char port)
-	  (indentationlevel (+ level 1)))
-	(if (eof-object? (peek-char port))
-	    -1
-	    level)))
-  (indentationlevel 0))
+  (define (indentationlevel)
+    (if (or (eq? (peek-char port) #\space)
+	    (eq? (peek-char port) #\ht))
+	(cons 
+	 (read-char port)
+	 (indentationlevel))
+	'()))
+  (list->string (indentationlevel)))
 
 (define (clean line)
   (cond
@@ -215,7 +222,7 @@ can be loaded with (use-modules (sugar)).
   (let* ((read (readblock-clean level port))
 	 (next-level (car read))
 	 (block (cdr read)))
-    (if (= next-level level)
+    (if (string=? next-level level)
 	(let* ((reads (readblocks level port))
 	       (next-next-level (car reads))
 	       (next-blocks (cdr reads)))
@@ -235,7 +242,7 @@ can be loaded with (use-modules (sugar)).
      ((eq? char #\newline)
       (read-char port)
       (let ((next-level (indentationlevel port)))
-	(if (> next-level level)
+	(if (indentation>? next-level level)
 	    (readblocks next-level port)
 	    (cons next-level '()))))
      ((or (eq? char #\space)
@@ -266,7 +273,7 @@ can be loaded with (use-modules (sugar)).
 	    (cons next-level '.)))))
 
 (define-public (sugar-read . port)
-  (let* ((read (readblock-clean 0 (if (null? port)
+  (let* ((read (readblock-clean "" (if (null? port)
 				      (current-input-port)
 				      (car port))))
 	 (level (car read))
@@ -296,6 +303,7 @@ can be loaded with (use-modules (sugar)).
   (set! primitive-load sugar-load-save))
 
 (sugar-enable)
+----{ sugar.scm }----
 
 
 Copyright (C) Egil Möller (2003). All Rights Reserved.
